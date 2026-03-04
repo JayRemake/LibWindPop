@@ -1,0 +1,177 @@
+name: build
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+    - '**.cs'
+    - '**.csproj'
+    - '.github/workflows/build.yml'
+  pull_request:
+    branches: [ master, main ]
+    paths:
+    - '**.cs'
+    - '**.csproj'
+  workflow_dispatch:  # 允许手动触发构建
+
+env:
+  DOTNET_VERSION: '8.0.x'  # 使用稳定的 .NET 8.0 版本
+
+jobs:
+  build:
+    name: build-${{ matrix.os.name }}
+    runs-on: ${{ matrix.os.runner }}
+    strategy:
+      fail-fast: false  # 即使某个平台失败，也继续构建其他平台
+      matrix:
+        os:
+        - name: linux
+          runner: ubuntu-latest
+          build_script: sh ./build/actions/linux-build.sh
+        - name: windows
+          runner: windows-latest
+          build_script: build/actions/win-build.bat
+        - name: macos
+          runner: macos-latest
+          build_script: sh ./build/actions/osx-build.sh
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Display .NET info
+      run: dotnet --info
+
+    - name: Restore dependencies
+      run: dotnet restore ./src/LibWindPop.csproj
+
+    - name: Build project
+      run: ${{ matrix.os.build_script }}
+
+    # ==================== Linux Artifacts ====================
+    - name: Upload Linux x64 Shared Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-linux-x64
+        path: ./build/publish/nativeaot/shared/linux-x64
+        if-no-files-found: warn
+
+    - name: Upload Linux x64 Static Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-linux-x64
+        path: ./build/publish/nativeaot/static/linux-x64
+        if-no-files-found: warn
+
+    - name: Upload Managed Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Managed-Library
+        path: ./build/publish/managed
+        if-no-files-found: warn
+
+    # ==================== Windows Artifacts ====================
+    - name: Upload Windows x64 Shared Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-win-x64
+        path: ./build/publish/nativeaot/shared/win-x64
+        if-no-files-found: warn
+
+    - name: Upload Windows x64 Static Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-win-x64
+        path: ./build/publish/nativeaot/static/win-x64
+        if-no-files-found: warn
+
+    - name: Upload Windows arm64 Shared Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-win-arm64
+        path: ./build/publish/nativeaot/shared/win-arm64
+        if-no-files-found: warn
+
+    - name: Upload Windows arm64 Static Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-win-arm64
+        path: ./build/publish/nativeaot/static/win-arm64
+        if-no-files-found: warn
+
+    # ==================== macOS Artifacts ====================
+    - name: Upload macOS x64 Shared Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-osx-x64
+        path: ./build/publish/nativeaot/shared/osx-x64
+        if-no-files-found: warn
+
+    - name: Upload macOS x64 Static Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-osx-x64
+        path: ./build/publish/nativeaot/static/osx-x64
+        if-no-files-found: warn
+
+    - name: Upload macOS arm64 Shared Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-osx-arm64
+        path: ./build/publish/nativeaot/shared/osx-arm64
+        if-no-files-found: warn
+
+    - name: Upload macOS arm64 Static Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-osx-arm64
+        path: ./build/publish/nativeaot/static/osx-arm64
+        if-no-files-found: warn
+
+  # ==================== Release Job ====================
+  # 当推送 tag 时创建 Release
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Display downloaded artifacts
+      run: ls -la ./artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ./artifacts/**/*
+        generate_release_notes: true
+        draft: false
+        prerelease: false
