@@ -1,0 +1,231 @@
+name: build-with-exe
+
+on:
+  push:
+    branches: [ master, main ]
+    paths:
+    - '**.cs'
+    - '**.csproj'
+    - '**.cpp'
+    - '**.c'
+    - '**.h'
+    - '**.vcxproj'
+    - '.github/workflows/build-with-exe.yml'
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:  # 允许手动触发构建
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  # ==================== 编译 LibWindPop 库 ====================
+  build-library:
+    name: build-library-${{ matrix.os.name }}
+    runs-on: ${{ matrix.os.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - name: linux
+          runner: ubuntu-latest
+          build_script: sh ./build/actions/linux-build.sh
+        - name: windows
+          runner: windows-latest
+          build_script: build/actions/win-build.bat
+        - name: macos
+          runner: macos-latest
+          build_script: sh ./build/actions/osx-build.sh
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore ./src/LibWindPop.csproj
+
+    - name: Build library
+      run: ${{ matrix.os.build_script }}
+
+    # 上传所有库文件作为 artifacts
+    - name: Upload Linux x64 Shared Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-linux-x64
+        path: ./build/publish/nativeaot/shared/linux-x64
+
+    - name: Upload Linux x64 Static Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-linux-x64
+        path: ./build/publish/nativeaot/static/linux-x64
+
+    - name: Upload Managed Library
+      if: matrix.os.name == 'linux'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Managed-Library
+        path: ./build/publish/managed
+
+    - name: Upload Windows x64 Shared Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-win-x64
+        path: ./build/publish/nativeaot/shared/win-x64
+
+    - name: Upload Windows x64 Static Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-win-x64
+        path: ./build/publish/nativeaot/static/win-x64
+
+    - name: Upload Windows arm64 Shared Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-win-arm64
+        path: ./build/publish/nativeaot/shared/win-arm64
+
+    - name: Upload Windows arm64 Static Library
+      if: matrix.os.name == 'windows'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-win-arm64
+        path: ./build/publish/nativeaot/static/win-arm64
+
+    - name: Upload macOS x64 Shared Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-osx-x64
+        path: ./build/publish/nativeaot/shared/osx-x64
+
+    - name: Upload macOS x64 Static Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-osx-x64
+        path: ./build/publish/nativeaot/static/osx-x64
+
+    - name: Upload macOS arm64 Shared Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Shared-Library-osx-arm64
+        path: ./build/publish/nativeaot/shared/osx-arm64
+
+    - name: Upload macOS arm64 Static Library
+      if: matrix.os.name == 'macos'
+      uses: actions/upload-artifact@v4
+      with:
+        name: LibWindPop-Static-Library-osx-arm64
+        path: ./build/publish/nativeaot/static/osx-arm64
+
+  # ==================== 编译 C++ 示例程序 (生成 exe) ====================
+  build-exe:
+    name: build-sample-exe
+    runs-on: windows-latest
+    needs: build-library  # 等待库编译完成
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Restore .NET dependencies
+      run: dotnet restore ./src/LibWindPop.csproj
+
+    # 先编译 LibWindPop 库（Windows x64 Shared）
+    - name: Build LibWindPop shared library
+      run: build/actions/win-build.bat
+      shell: cmd
+
+    # 编译 RsbAndPtxCoder 示例程序
+    - name: Build RsbAndPtxCoder exe
+      run: |
+        msbuild samples/cpp/RsbAndPtxCoder/RsbAndPtxCoder.vcxproj `
+          /p:Configuration=Release `
+          /p:Platform=x64 `
+          /p:AdditionalIncludePaths="${{ github.workspace }}\build\publish\nativeaot\shared\win-x64;${{ github.workspace }}\samples\cpp\ThridPart\PVRTexLib" `
+          /p:AdditionalLibraryPaths="${{ github.workspace }}\build\publish\nativeaot\shared\win-x64;${{ github.workspace }}\samples\cpp\ThridPart\PVRTexLib"
+      shell: pwsh
+
+    # 复制 DLL 到 exe 目录
+    - name: Copy DLLs to output
+      run: |
+        $exeDir = "samples/cpp/RsbAndPtxCoder/x64/Release"
+        Copy-Item "build/publish/nativeaot/shared/win-x64/LibWindPop.dll" -Destination $exeDir -Force
+        Copy-Item "samples/cpp/ThridPart/PVRTexLib/PVRTexLib.dll" -Destination $exeDir -Force
+      shell: pwsh
+
+    # 上传 exe 程序
+    - name: Upload RsbAndPtxCoder exe
+      uses: actions/upload-artifact@v4
+      with:
+        name: RsbAndPtxCoder-win-x64
+        path: |
+          samples/cpp/RsbAndPtxCoder/x64/Release/*.exe
+          samples/cpp/RsbAndPtxCoder/x64/Release/*.dll
+
+    # 编译 PakAndPtxCoder 示例程序
+    - name: Build PakAndPtxCoder exe
+      run: |
+        msbuild samples/cpp/PakAndPtxCoder/PakAndPtxCoder.vcxproj `
+          /p:Configuration=Release `
+          /p:Platform=x64
+      shell: pwsh
+      continue-on-error: true  # 如果项目不存在则继续
+
+    - name: Upload PakAndPtxCoder exe
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: PakAndPtxCoder-win-x64
+        path: |
+          samples/cpp/PakAndPtxCoder/x64/Release/*.exe
+          samples/cpp/PakAndPtxCoder/x64/Release/*.dll
+      continue-on-error: true
+
+  # ==================== 创建 Release ====================
+  create-release:
+    name: Create Release
+    needs: [build-library, build-exe]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ./artifacts/**/*
+        generate_release_notes: true
+        draft: false
+        prerelease: false
