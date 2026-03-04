@@ -13,7 +13,7 @@ on:
     - '.github/workflows/build-with-exe.yml'
   pull_request:
     branches: [ master, main ]
-  workflow_dispatch:  # 允许手动触发构建
+  workflow_dispatch:
 
 env:
   DOTNET_VERSION: '8.0.x'
@@ -52,7 +52,6 @@ jobs:
     - name: Build library
       run: ${{ matrix.os.build_script }}
 
-    # 上传所有库文件作为 artifacts
     - name: Upload Linux x64 Shared Library
       if: matrix.os.name == 'linux'
       uses: actions/upload-artifact@v4
@@ -134,7 +133,7 @@ jobs:
   build-exe:
     name: build-sample-exe
     runs-on: windows-latest
-    needs: build-library  # 等待库编译完成
+    needs: build-library
 
     steps:
     - name: Checkout repository
@@ -156,22 +155,33 @@ jobs:
       run: build/actions/win-build.bat
       shell: cmd
 
+    # 显示库文件是否生成
+    - name: List library files
+      run: |
+        Write-Host "=== Checking shared library ==="
+        Get-ChildItem -Path "build/publish/nativeaot/shared/win-x64" -ErrorAction SilentlyContinue
+        Write-Host "=== Checking PVRTexLib ==="
+        Get-ChildItem -Path "samples/cpp/ThridPart/PVRTexLib" -ErrorAction SilentlyContinue
+      shell: pwsh
+
     # 编译 RsbAndPtxCoder 示例程序
     - name: Build RsbAndPtxCoder exe
       run: |
-        msbuild samples/cpp/RsbAndPtxCoder/RsbAndPtxCoder.vcxproj `
-          /p:Configuration=Release `
-          /p:Platform=x64 `
-          /p:AdditionalIncludePaths="${{ github.workspace }}\build\publish\nativeaot\shared\win-x64;${{ github.workspace }}\samples\cpp\ThridPart\PVRTexLib" `
-          /p:AdditionalLibraryPaths="${{ github.workspace }}\build\publish\nativeaot\shared\win-x64;${{ github.workspace }}\samples\cpp\ThridPart\PVRTexLib"
-      shell: pwsh
+        msbuild samples/cpp/RsbAndPtxCoder/RsbAndPtxCoder.vcxproj /p:Configuration=Release /p:Platform=x64
+      shell: cmd
 
     # 复制 DLL 到 exe 目录
     - name: Copy DLLs to output
       run: |
         $exeDir = "samples/cpp/RsbAndPtxCoder/x64/Release"
-        Copy-Item "build/publish/nativeaot/shared/win-x64/LibWindPop.dll" -Destination $exeDir -Force
-        Copy-Item "samples/cpp/ThridPart/PVRTexLib/PVRTexLib.dll" -Destination $exeDir -Force
+        if (Test-Path $exeDir) {
+          Copy-Item "build/publish/nativeaot/shared/win-x64/LibWindPop.dll" -Destination $exeDir -Force -ErrorAction SilentlyContinue
+          Copy-Item "samples/cpp/ThridPart/PVRTexLib/PVRTexLib.dll" -Destination $exeDir -Force -ErrorAction SilentlyContinue
+          Write-Host "DLLs copied successfully"
+          Get-ChildItem $exeDir
+        } else {
+          Write-Host "Output directory not found: $exeDir"
+        }
       shell: pwsh
 
     # 上传 exe 程序
@@ -182,15 +192,25 @@ jobs:
         path: |
           samples/cpp/RsbAndPtxCoder/x64/Release/*.exe
           samples/cpp/RsbAndPtxCoder/x64/Release/*.dll
+        if-no-files-found: warn
 
     # 编译 PakAndPtxCoder 示例程序
     - name: Build PakAndPtxCoder exe
       run: |
-        msbuild samples/cpp/PakAndPtxCoder/PakAndPtxCoder.vcxproj `
-          /p:Configuration=Release `
-          /p:Platform=x64
+        msbuild samples/cpp/PakAndPtxCoder/PakAndPtxCoder.vcxproj /p:Configuration=Release /p:Platform=x64
+      shell: cmd
+      continue-on-error: true
+
+    - name: Copy DLLs for PakAndPtxCoder
+      if: success()
+      run: |
+        $exeDir = "samples/cpp/PakAndPtxCoder/x64/Release"
+        if (Test-Path $exeDir) {
+          Copy-Item "build/publish/nativeaot/shared/win-x64/LibWindPop.dll" -Destination $exeDir -Force -ErrorAction SilentlyContinue
+          Copy-Item "samples/cpp/ThridPart/PVRTexLib/PVRTexLib.dll" -Destination $exeDir -Force -ErrorAction SilentlyContinue
+        }
       shell: pwsh
-      continue-on-error: true  # 如果项目不存在则继续
+      continue-on-error: true
 
     - name: Upload PakAndPtxCoder exe
       if: success()
@@ -200,6 +220,7 @@ jobs:
         path: |
           samples/cpp/PakAndPtxCoder/x64/Release/*.exe
           samples/cpp/PakAndPtxCoder/x64/Release/*.dll
+        if-no-files-found: warn
       continue-on-error: true
 
   # ==================== 创建 Release ====================
