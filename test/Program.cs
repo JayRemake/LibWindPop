@@ -127,20 +127,6 @@ namespace LibWindPop.Test
                 ptxHandler,
                 false
                 );
-            RsbContentPipelineManager.AddContentPipeline(
-                outPath,
-                nameof(EncodePtxFromPng),
-                true,
-                fileSystem,
-                logger
-                );
-            RsbContentPipelineManager.AddContentPipeline(
-                outPath,
-                nameof(SquarePVRTCImages),
-                true,
-                fileSystem,
-                logger
-                );
         }
     }
 }
